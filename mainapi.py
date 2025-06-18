@@ -48,7 +48,11 @@ def get_users():
 
 @app.route("/GetAllTeachers", methods=["GET"])
 def get_teachers():
-    rows = db.session.execute(text("SELECT t.id AS T_id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio, STRING_AGG(tl.Languages, ', ') AS Languages FROM Teacher t LEFT JOIN Teacher_Languages tl ON t.id = tl.TeacherID GROUP BY t.id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio"))
+    rows = db.session.execute(
+        text(
+            "SELECT t.id AS T_id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio, STRING_AGG(tl.Languages, ', ') AS Languages FROM Teacher t LEFT JOIN Teacher_Languages tl ON t.id = tl.TeacherID GROUP BY t.id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio"
+        )
+    )
 
     rw = []
     keys = [
@@ -75,8 +79,7 @@ def get_teachers():
     return jsonify(rw), 200
 
 
-
-@app.route("/SignUpStudents", methods=["Post"])
+@app.route("/SignUpStudents", methods=["POST"])
 def SignupStudent():
     body = request.json
     print(body)
@@ -86,57 +89,105 @@ def SignupStudent():
     region = body.get("region", "def")
     password = body.get("password", "def")
     gender = body.get("gender", "def")
-    spic = body.get("spic", "def")
+    pic = body.get("pic", "def")
 
-    check_query = text(f"SELECT COUNT(*) FROM Student WHERE username = '{username}'")
+    check_query = text(f"SELECT COUNT(*) FROM Student WHERE username = :username")
     result = db.session.execute(check_query, {"username": username}).scalar()
 
     if result > 0:
-        return jsonify(
-            {"error": "Username already taken, please try a different username"}
-        ), 409
+        return (
+            jsonify(
+                {"error": "Username already taken, please try a different username"}
+            ),
+            409,
+        )
 
     else:
         query = text(
-            f"INSERT INTO STUDENT VALUES('{username}','{name}','{password}','{region}','{gender}','{dob}','{spic}',1)"
+            "INSERT INTO Student (username, name, password, region, gender, dob, pic) VALUES (:username, :name, :password, :region, :gender, :dob, :pic)"
         )
 
         try:
-            db.session.execute(query)
+            db.session.execute(
+                query,
+                {
+                    "username": username,
+                    "name": name,
+                    "password": password,
+                    "region": region,
+                    "gender": gender,
+                    "dob": dob,
+                    "pic": pic,
+                },
+            )
+            db.session.commit()
+            return jsonify({"message": "Inserted Data"}), 201
         except Exception as e:
             print(e)
+            db.session.rollback()
+            return jsonify({"error": "Database insert failed", "details": str(e)}), 500
 
-        return jsonify("Inserted Data")
 
-
-@app.route("/SignupParent", methods=["Post"])
-def SignUpParent():  
+@app.route("/SignupParent", methods=["POST"])
+def SignUpParent():
     body = request.json
     print(body)
+
     name = body.get("name", "def")
     region = body.get("region", "def")
     cnic = body.get("cnic", "def")
     username = body.get("username", "def")
     password = body.get("password", "def")
+    student_username = body.get("student_username", "def")
 
-    check_query = text(f"SELECT COUNT(*) FROM Parent WHERE username = '{username}'")
+    # 1. Check if username already exists
+    check_query = text("SELECT COUNT(*) FROM Parent WHERE username = :username")
     result = db.session.execute(check_query, {"username": username}).scalar()
 
     if result > 0:
-        return jsonify(
-            {"error": "Username already taken, please try a different username"}
-        ), 409
-    else:
-        query = text(
-        f"INSERT INTO PARENT VALUES ('{name}','{cnic}','{username}','{password}','{region}')"
+        return (
+            jsonify(
+                {"error": "Username already taken, please try a different username"}
+            ),
+            409,
         )
-        try:
-            db.session.execute(query)
 
-        except Exception as err:
-            print(err)
+    # 2. Get student_id from Student table
+    student_query = text("SELECT id FROM Student WHERE username = :s_username")
+    student_result = db.session.execute(
+        student_query, {"s_username": student_username}
+    ).fetchone()
 
-    return jsonify("Data has been Inserted")
+    if not student_result:
+        return jsonify({"error": "Student username not found"}), 404
+
+    student_id = student_result[0]
+
+    # 3. Insert into Parent table with student_id
+    insert_query = text(
+        "INSERT INTO Parent (name, cnic, username, password, region, student_ID) "
+        "VALUES (:name, :cnic, :username, :password, :region, :student_id)"
+    )
+
+    try:
+        db.session.execute(
+            insert_query,
+            {
+                "name": name,
+                "cnic": cnic,
+                "username": username,
+                "password": password,
+                "region": region,
+                "student_id": student_id,
+            },
+        )
+        db.session.commit()
+        return jsonify({"message": "Data has been inserted"}), 201
+
+    except Exception as err:
+        print(err)
+        db.session.rollback()
+        return jsonify({"error": "Database insert failed", "details": str(err)}), 500
 
 
 @app.route("/SignUpTeacher", methods=["Post"])
@@ -157,9 +208,12 @@ def SignUpTeacher():
     result = db.session.execute(check_query, {"username": username}).scalar()
 
     if result > 0:
-        return jsonify(
-            {"error": "Username already taken, please try a different username"}
-        ), 409
+        return (
+            jsonify(
+                {"error": "Username already taken, please try a different username"}
+            ),
+            409,
+        )
     else:
         query = text(
             f"INSERT INTO TEACHER VALUES('{firstname}','{lastname}','{region}','{tpic}','{qual}','{username}','{password}','{0}','{cnic}','{gender}')"
@@ -189,7 +243,7 @@ def GetStudentByUsername():
         "gender",
         "dob",
         "pic",
-        "parent_id"
+        "parent_id",
     ]
     for row in rows:
         rw.append(dict(zip(keys, row)))
@@ -215,7 +269,8 @@ def UpdateStudentByUsername():
     psw = data.get("psw", "Def")
 
     try:
-        query = text("""
+        query = text(
+            """
             UPDATE Student
             SET fname = :firstname,
                 lname = :lastname,
@@ -223,7 +278,8 @@ def UpdateStudentByUsername():
                 region = :region,
                 psw = :psw
             WHERE username = :usrname
-        """)
+        """
+        )
         db.session.execute(
             query,
             {
@@ -265,9 +321,12 @@ def DeleteStudentByUsername():
         db.session.execute(query, {"usrname": usrname})
         db.session.commit()
 
-        return jsonify(
-            {"message": f"Student with username '{usrname}' deleted successfully"}
-        ), 200
+        return (
+            jsonify(
+                {"message": f"Student with username '{usrname}' deleted successfully"}
+            ),
+            200,
+        )
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -284,10 +343,12 @@ def LoginStudent():
 
     try:
         # Query the database to verify the username and password
-        query = text("""
+        query = text(
+            """
             SELECT * FROM Student 
             WHERE username = :username AND password = :password
-        """)
+        """
+        )
         result = db.session.execute(
             query, {"username": username, "password": password}
         ).fetchone()
@@ -332,10 +393,12 @@ def GetTeachersByCourse():
 @app.route("/getAvailableSlots", methods=["GET"])
 def avail_slots():
     qari_id = request.args.get("qari_id")
-    query = text(f"""SELECT t.id AS qariId, t.name AS qariName, ts.day, s.time, s.slot_id  FROM Teacher t 
+    query = text(
+        f"""SELECT t.id AS qariId, t.name AS qariName, ts.day, s.time, s.slot_id  FROM Teacher t 
                     INNER JOIN TeacherSchedule ts ON t.id = ts.teacher_id 
                     INNER JOIN Slot s ON ts.id = s.sch_id
-                    WHERE t.id = '{qari_id}' AND booked = 0""")
+                    WHERE t.id = '{qari_id}' AND booked = 0"""
+    )
     print(query)
     try:
         res = db.session.execute(query)
@@ -389,7 +452,8 @@ def book_slots():
 @app.route("/GetEnrolledCourses", methods=["Get"])
 def EnrolledCourses():
     stu_id = request.args.get("stu_id")
-    query = text(f"""SELECT s.name as Studentname, c.name as Coursename, c.description as coursedescription, t.name AS TeacherName, sl.time as SlotTime FROM Student s 
+    query = text(
+        f"""SELECT s.name as Studentname, c.name as Coursename, c.description as coursedescription, t.name AS TeacherName, sl.time as SlotTime FROM Student s 
                     INNER JOIN Enrollment e
                     ON s.id = e.student_id
                     INNER JOIN Course c
@@ -400,7 +464,8 @@ def EnrolledCourses():
                     ON bs.enrollment_id = e.id
                     INNER JOIN Slot sl 
                     ON sl.slot_id = bs.slot_id 
-                    where s.id='{stu_id}'""")
+                    where s.id='{stu_id}'"""
+    )
     print(query)
     try:
         res = db.session.execute(query)
@@ -430,9 +495,6 @@ def get_course():
     return jsonify(rw)
 
 
-
-
-
 # Teacher Side
 @app.route("/UpdateTeacherByUsername", methods=["POST"])
 def UpdateTeacherByUsername():
@@ -455,7 +517,8 @@ def UpdateTeacherByUsername():
     region = body.get("region", "def")
 
     try:
-        query = text(f"""
+        query = text(
+            f"""
             UPDATE Teacher
             SET name = '{name}',
                 password = '{password}',
@@ -464,14 +527,18 @@ def UpdateTeacherByUsername():
                 qualification = '{qualification}',
                 region = '{region}'
             WHERE username = '{username}'
-        """)
+        """
+        )
 
         db.session.execute(query)
         db.session.commit()
 
-        return jsonify(
-            {"message": f"Teacher with username '{username}' updated successfully"}
-        ), 200
+        return (
+            jsonify(
+                {"message": f"Teacher with username '{username}' updated successfully"}
+            ),
+            200,
+        )
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -484,7 +551,8 @@ def GetQariCoursesAndSchedule():
     if not qari_id:
         return jsonify({"error": "Qari ID is required"}), 400
 
-    query = text("""
+    query = text(
+        """
             SELECT t.id AS QariId,t.name AS QariName,c.id AS CourseId,c.name AS CourseName,c.description AS CourseDescription,ts.day AS ScheduleDay,s.time AS SlotTime,s.slot_id AS SlotId, s.booked AS IsBooked
             FROM Teacher t
             INNER JOIN TeacherCourse tc 
@@ -496,7 +564,8 @@ def GetQariCoursesAndSchedule():
             INNER JOIN Slot s 
             ON ts.id = s.sch_id
             WHERE t.id = :qari_id
-            """)
+            """
+    )
 
     try:
         result = db.session.execute(query, {"qari_id": qari_id})
@@ -517,9 +586,12 @@ def GetQariCoursesAndSchedule():
             rw.append(dict(zip(keys, row)))
 
         if not rw:
-            return jsonify(
-                {"message": "No courses or schedules found for the specified Qari"}
-            ), 404
+            return (
+                jsonify(
+                    {"message": "No courses or schedules found for the specified Qari"}
+                ),
+                404,
+            )
 
         return jsonify(rw), 200
 
