@@ -1,5 +1,7 @@
+import base64
 import datetime
-from flask import Flask, jsonify, request
+import os
+from flask import Flask, current_app, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from datetime import date
@@ -89,7 +91,32 @@ def SignupStudent():
     region = body.get("region", "def")
     password = body.get("password", "def")
     gender = body.get("gender", "def")
-    pic = body.get("pic", "def")
+    pic = body.get("pic")
+    pic_path = None
+
+    print("RAW pic value:", pic)
+
+    if pic and pic != "def" and len(pic) > 30:
+        try:
+            header, encoded = pic.split(',', 1) if ',' in pic else ('', pic)
+            img_bytes = base64.b64decode(encoded)
+            
+            img_dir = os.path.join(current_app.root_path, 'static', 'profile_images')
+            os.makedirs(img_dir, exist_ok=True)
+
+            filename = f"{username}_profile.png"
+            file_path = os.path.join(img_dir, filename)
+
+            with open(file_path, 'wb') as f:
+                f.write(img_bytes)
+
+            pic_path = f"/static/profile_images/{filename}"
+            print(f"Image saved at: {pic_path}")
+        except Exception as e:
+            print("Image save failed:", e)
+            return jsonify({"error": "Failed to save image", "details": str(e)}), 500
+    else:
+        print("No valid image provided.")
 
     check_query = text(f"SELECT COUNT(*) FROM Student WHERE username = :username")
     result = db.session.execute(check_query, {"username": username}).scalar()
@@ -117,7 +144,7 @@ def SignupStudent():
                     "region": region,
                     "gender": gender,
                     "dob": dob,
-                    "pic": pic,
+                    "pic": pic_path,
                 },
             )
             db.session.commit()
@@ -139,6 +166,32 @@ def SignUpParent():
     username = body.get("username", "def")
     password = body.get("password", "def")
     student_username = body.get("student_username", "def")
+    pic = body.get("pic")
+    pic_path = None
+
+    print("RAW pic value:", pic)
+    
+    if pic and pic != "def" and len(pic) > 30:
+        try:
+            header, encoded = pic.split(',', 1) if ',' in pic else ('', pic)
+            img_bytes = base64.b64decode(encoded)
+            
+            img_dir = os.path.join(current_app.root_path, 'static', 'profile_images')
+            os.makedirs(img_dir, exist_ok=True)
+
+            filename = f"{username}_profile.png"
+            file_path = os.path.join(img_dir, filename)
+
+            with open(file_path, 'wb') as f:
+                f.write(img_bytes)
+
+            pic_path = f"/static/profile_images/{filename}"
+            print(f"Image saved at: {pic_path}")
+        except Exception as e:
+            print("Image save failed:", e)
+            return jsonify({"error": "Failed to save image", "details": str(e)}), 500
+    else:
+        print("No valid image provided.")
 
     # 1. Check if username already exists
     check_query = text("SELECT COUNT(*) FROM Parent WHERE username = :username")
@@ -194,15 +247,42 @@ def SignUpParent():
 def SignUpTeacher():
     body = request.json
 
-    firstname = body.get("firstname", "def")
-    lastname = body.get("lastname", "def")
+    name = body.get("name", "def")
     username = body.get("username", "def")
     region = body.get("region", "def")
     password = body.get("password", "def")
     gender = body.get("gender", "def")
-    tpic = body.get("spic", "def")
-    qual = body.get("qual", "def")
+    qualification = body.get("qual", "def")
     cnic = body.get("cnic", "def")
+    dob = body.get("dob", "def")
+    courses = body.get("courses", "def")
+    pic = body.get("pic")
+    pic_path = None
+
+    print("RAW pic value:", pic)
+    
+    if pic and pic != "def" and len(pic) > 30:
+        try:
+            header, encoded = pic.split(',', 1) if ',' in pic else ('', pic)
+            img_bytes = base64.b64decode(encoded)
+            
+            img_dir = os.path.join(current_app.root_path, 'static', 'profile_images')
+            os.makedirs(img_dir, exist_ok=True)
+
+            filename = f"{username}_profile.png"
+            file_path = os.path.join(img_dir, filename)
+
+            with open(file_path, 'wb') as f:
+                f.write(img_bytes)
+
+            pic_path = f"/static/profile_images/{filename}"
+            print(f"Image saved at: {pic_path}")
+        except Exception as e:
+            print("Image save failed:", e)
+            return jsonify({"error": "Failed to save image", "details": str(e)}), 500
+    else:
+        print("No valid image provided.")
+
 
     check_query = text(f"SELECT COUNT(*) FROM Teacher WHERE username = '{username}'")
     result = db.session.execute(check_query, {"username": username}).scalar()
@@ -216,7 +296,7 @@ def SignUpTeacher():
         )
     else:
         query = text(
-            f"INSERT INTO TEACHER VALUES('{firstname}','{lastname}','{region}','{tpic}','{qual}','{username}','{password}','{0}','{cnic}','{gender}')"
+            f"INSERT INTO TEACHER VALUES('{name},'{region}','{pic_path}','{qualification}','{username}','{password}','{0}','{cnic}','{gender}')"
         )
         try:
             db.session.execute(query)
@@ -332,6 +412,8 @@ def DeleteStudentByUsername():
         return jsonify({"error": str(e)}), 500
 
 
+# LOGINS 
+
 @app.route("/LoginStudent", methods=["GET"])
 def LoginStudent():
     # Retrieve username and password from query parameters
@@ -363,6 +445,70 @@ def LoginStudent():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/LoginTeacher", methods=["GET"])
+def LoginTeacher():
+    # Retrieve username and password from query parameters
+    username = request.args.get("username")
+    password = request.args.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    try:
+        # Query the database to verify the username and password
+        query = text(
+            """
+            SELECT * FROM Teacher 
+            WHERE username = :username AND password = :password
+        """
+        )
+        result = db.session.execute(
+            query, {"username": username, "password": password}
+        ).fetchone()
+
+        if result:
+            # If a match is found, return success
+            return jsonify({"message": "Login successful", "username": username}), 200
+        else:
+            # If no match is found, return error
+            return jsonify({"error": "Invalid username or password"}), 401
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/LoginParent", methods=["GET"])
+def LoginParent():
+    # Retrieve username and password from query parameters
+    username = request.args.get("username")
+    password = request.args.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    try:
+        # Query the database to verify the username and password
+        query = text(
+            """
+            SELECT * FROM Parent 
+            WHERE username = :username AND password = :password
+        """
+        )
+        result = db.session.execute(
+            query, {"username": username, "password": password}
+        ).fetchone()
+
+        if result:
+            # If a match is found, return success
+            return jsonify({"message": "Login successful", "username": username}), 200
+        else:
+            # If no match is found, return error
+            return jsonify({"error": "Invalid username or password"}), 401
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 
 @app.route("/GetTeachersByCourse", methods=["GET"])
 def GetTeachersByCourse():
