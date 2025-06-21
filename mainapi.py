@@ -14,7 +14,7 @@ CORS(app)
 
 # Configure the SQL Server database connection
 app.config["SQLALCHEMY_DATABASE_URI"] = (
-    "mssql+pyodbc://sa:123@DESKTOP-1TTIBM1\\MRAFE01/QURAN_TUTOR_DB?driver=ODBC+Driver+17+for+SQL+Server"
+    "mssql+pyodbc://sa:123@DESKTOP-51B7KMU/QURAN_TUTOR_DB?driver=ODBC+Driver+17+for+SQL+Server"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -31,53 +31,53 @@ def get_users():
     rows = db.session.execute(text("SELECT * FROM Student"))
     rw = []
     keys = [
-        "S_id",
-        "S_Username",
-        "S_Name",
-        "S_psw",
-        "S_region",
-        "S_gender",
-        "S_dob",
-        "S_pic",
-        "Parent_id",
+        "id",
+        "username",
+        "name",
+        "password",
+        "region",
+        "gender",
+        "dob",
+        "pic"
     ]
     for row in rows:
-        print(row)
         rw.append(dict(zip(keys, row)))
-
     return jsonify(rw), 200
+
 
 
 @app.route("/GetAllTeachers", methods=["GET"])
 def get_teachers():
-    rows = db.session.execute(
-        text(
-            "SELECT t.id AS T_id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio, STRING_AGG(tl.Languages, ', ') AS Languages FROM Teacher t LEFT JOIN Teacher_Languages tl ON t.id = tl.TeacherID GROUP BY t.id, t.username, t.Name, t.Password, t.CNIC, t.Region, t.Qualification, t.Gender, t.DOB, t.pic, t.Ratings, t.Hourly_Rate, t.Sect, t.Bio"
-        )
-    )
-
-    rw = []
+    query = """
+        SELECT 
+            t.id AS T_id,
+            t.username,
+            t.name,
+            t.password,
+            t.cnic,
+            t.region,
+            t.qualification,
+            t.gender,
+            t.dob,
+            t.pic,
+            t.ratings,
+            t.hourly_rate,
+            t.bio,
+            STRING_AGG(tl.Languages, ', ') AS Languages
+        FROM Teacher t
+        LEFT JOIN Teacher_Languages tl ON t.id = tl.TeacherID
+        GROUP BY 
+            t.id, t.username, t.name, t.password, t.cnic, t.region,
+            t.qualification, t.gender, t.dob, t.pic, t.ratings,
+            t.hourly_rate, t.bio
+    """
+    rows = db.session.execute(text(query))
     keys = [
-        "T-id",
-        "T_username",
-        "Name",
-        "Password",
-        "CNIC",
-        "Region",
-        "Qualification",
-        "Gender",
-        "DOB",
-        "pic",
-        "Rating",
-        "Hourly_Rate",
-        "Sect",
-        "Bio",
-        "Languages",
+        "id", "username", "name", "password", "cnic", "region",
+        "qualification", "gender", "dob", "pic", "ratings",
+        "hourly_rate", "bio", "languages"
     ]
-    for row in rows:
-        print(row)
-        rw.append(dict(zip(keys, row)))
-
+    rw = [dict(zip(keys, row)) for row in rows]
     return jsonify(rw), 200
 
 
@@ -243,10 +243,9 @@ def SignUpParent():
         return jsonify({"error": "Database insert failed", "details": str(err)}), 500
 
 
-@app.route("/SignUpTeacher", methods=["Post"])
+@app.route("/SignUpTeacher", methods=["POST"])
 def SignUpTeacher():
     body = request.json
-
     name = body.get("name", "def")
     username = body.get("username", "def")
     region = body.get("region", "def")
@@ -255,55 +254,71 @@ def SignUpTeacher():
     qualification = body.get("qual", "def")
     cnic = body.get("cnic", "def")
     dob = body.get("dob", "def")
-    courses = body.get("courses", "def")
+    ratings = 0
+    hourly_rate = body.get("hourly_rate", 0)
+    bio = body.get("bio", "None")
+    sample_clip = body.get("sample_clip", None)
+    languages = body.get("languages", [])  # list of strings
     pic = body.get("pic")
     pic_path = None
 
-    print("RAW pic value:", pic)
-    
-    if pic and pic != "def" and len(pic) > 30:
+    # Handle image upload
+    if pic and len(pic) > 30:
         try:
             header, encoded = pic.split(',', 1) if ',' in pic else ('', pic)
             img_bytes = base64.b64decode(encoded)
-            
             img_dir = os.path.join(current_app.root_path, 'static', 'profile_images')
             os.makedirs(img_dir, exist_ok=True)
-
             filename = f"{username}_profile.png"
             file_path = os.path.join(img_dir, filename)
-
             with open(file_path, 'wb') as f:
                 f.write(img_bytes)
-
             pic_path = f"/static/profile_images/{filename}"
-            print(f"Image saved at: {pic_path}")
         except Exception as e:
-            print("Image save failed:", e)
             return jsonify({"error": "Failed to save image", "details": str(e)}), 500
-    else:
-        print("No valid image provided.")
 
-
-    check_query = text(f"SELECT COUNT(*) FROM Teacher WHERE username = '{username}'")
+    # Check duplicate username
+    check_query = text("SELECT COUNT(*) FROM Teacher WHERE username = :username")
     result = db.session.execute(check_query, {"username": username}).scalar()
-
     if result > 0:
-        return (
-            jsonify(
-                {"error": "Username already taken, please try a different username"}
-            ),
-            409,
-        )
-    else:
-        query = text(
-            f"INSERT INTO TEACHER VALUES('{name},'{region}','{pic_path}','{qualification}','{username}','{password}','{0}','{cnic}','{gender}')"
-        )
-        try:
-            db.session.execute(query)
-        except Exception as error:
-            print(error)
+        return jsonify({"error": "Username already taken"}), 409
 
-    return jsonify("Thank You for joining us")
+    # Insert Teacher
+    insert_query = text("""
+        INSERT INTO Teacher (username, name, password, cnic, region, qualification, gender, dob, pic, ratings, hourly_rate, bio, SampleClip)
+        VALUES (:username, :name, :password, :cnic, :region, :qualification, :gender, :dob, :pic, :ratings, :hourly_rate, :bio, :sample_clip)
+    """)
+    try:
+        db.session.execute(insert_query, {
+            "username": username,
+            "name": name,
+            "password": password,
+            "cnic": cnic,
+            "region": region,
+            "qualification": qualification,
+            "gender": gender,
+            "dob": dob,
+            "pic": pic_path,
+            "ratings": ratings,
+            "hourly_rate": hourly_rate,
+            "bio": bio,
+            "sample_clip": sample_clip,
+        })
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Teacher insertion failed", "details": str(e)}), 500
+
+    # Insert languages
+    teacher_id = db.session.execute(text("SELECT id FROM Teacher WHERE username = :username"), {"username": username}).scalar()
+    for lang in languages:
+        db.session.execute(
+            text("INSERT INTO Teacher_Languages (TeacherID, Languages) VALUES (:teacher_id, :language)"),
+            {"teacher_id": teacher_id, "language": lang}
+        )
+    db.session.commit()
+
+    return jsonify({"message": "Teacher registered successfully"}), 201
 
 
 @app.route("/GetStudentByUsername", methods=["GET"])
