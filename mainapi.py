@@ -16,7 +16,7 @@ CORS(app)
 
 # Configure the SQL Server database connection
 app.config["SQLALCHEMY_DATABASE_URI"] = (
-    "mssql+pyodbc://sa:123@DESKTOP-1TTIBM1\\MRAFE01/QURAN_TUTOR_DB?driver=ODBC+Driver+17+for+SQL+Server"
+    "mssql+pyodbc://sa:123@DESKTOP-1TTIBM1\\MRAFE01/QURAN_TUTOR_DB?driver=ODBC+Driver+17+for+SQL+Server&multiple_active_result_sets=true"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -620,6 +620,8 @@ def GetParentProfile():
     ).fetchall()
     students_list = [dict(row._mapping) for row in students]
 
+    print("[GetParentProfile] Children data:", students_list)
+
     data = dict(parent._mapping)
     data["role"] = "Parent"
     data["children"] = students_list
@@ -702,6 +704,8 @@ def GetParentDashboard():
     """), {"parent_id": parent_id})
 
     result["children"] = [dict(row._mapping) for row in children_data]
+
+    print("[GetParentDashboard] Children data:", result["children"])
 
     # Upcoming Sessions
     upcoming_sessions = db.session.execute(text("""
@@ -872,8 +876,7 @@ def GetTeacherDashboard():
             AND CAST(v.CallStartTime AS DATE) = CAST(GETDATE() AS DATE)
         ORDER BY v.CallStartTime
     """), {"teacher_id": teacher_id})
-
-    results["todaysSchedule"] = [dict(row) for row in todays_schedule_query]
+    results["todaysSchedule"] = [dict(row._mapping) for row in todays_schedule_query.fetchall()]
 
     # Recent students
     recent_students_query = db.session.execute(text("""
@@ -892,8 +895,7 @@ def GetTeacherDashboard():
         GROUP BY s.id, s.name, s.pic, c.name
         ORDER BY s.id DESC
     """), {"teacher_id": teacher_id})
-
-    results["recentStudents"] = [dict(row) for row in recent_students_query]
+    results["recentStudents"] = [dict(row._mapping) for row in recent_students_query.fetchall()]
 
     return jsonify(results)
 
@@ -2200,16 +2202,23 @@ def hire_teacher(username):
         # If slots are provided, book them
         if selected_schedule and isinstance(selected_schedule, list):
             # Validate all slot IDs
-            valid_slots = db.session.execute(text(f"SELECT slot_id FROM Slot WHERE slot_id IN ({','.join(str(int(sid)) for sid in selected_schedule)})"))
+            valid_slots = db.session.execute(
+                text(f"SELECT slot_id FROM Slot WHERE slot_id IN ({','.join(str(int(sid)) for sid in selected_schedule)}) AND booked = 0")
+            )
             valid_slot_ids = {row.slot_id for row in valid_slots}
             for slot_id in selected_schedule:
                 if int(slot_id) not in valid_slot_ids:
                     db.session.rollback()
-                    return jsonify({'error': f'Invalid slot ID: {slot_id}'}), 400
+                    return jsonify({'error': f'Invalid or already booked slot ID: {slot_id}'}), 400
             # Book slots
-            db.session.execute(text(f"UPDATE Slot SET booked = 1 WHERE slot_id IN ({','.join(str(int(sid)) for sid in selected_schedule)})"))
+            db.session.execute(
+                text(f"UPDATE Slot SET booked = 1 WHERE slot_id IN ({','.join(str(int(sid)) for sid in selected_schedule)})")
+            )
             for slot_id in selected_schedule:
-                db.session.execute(text("INSERT INTO BookedEnrollmentSlots (enrollment_id, slot_id) VALUES (:enrollment_id, :slot_id)"), {"enrollment_id": enrollment_id, "slot_id": int(slot_id)})
+                db.session.execute(
+                    text("INSERT INTO BookedEnrollmentSlots (enrollment_id, slot_id) VALUES (:enrollment_id, :slot_id)"),
+                    {"enrollment_id": enrollment_id, "slot_id": int(slot_id)}
+                )
         db.session.commit()
         return jsonify({'message': 'Teacher hired and student enrolled successfully!'}), 201
     except Exception as e:
@@ -2282,7 +2291,7 @@ def GetTeacherCompleteData():
             s.pic AS avatar,
             c.name AS currentCourse,
             COALESCE(AVG(CAST(r.RatingValue AS FLOAT)), 0) AS rating,
-            75 AS progress
+            75 AS progress  -- You can update this with dynamic logic
         FROM Enrollment e
         JOIN Student s ON s.id = e.student_id
         JOIN Course c ON c.id = e.course_id
@@ -2291,8 +2300,8 @@ def GetTeacherCompleteData():
         GROUP BY s.id, s.name, s.pic, c.name
         ORDER BY s.id DESC
     """)
-    recent_students = db.session.execute(recent_students_query, {'teacher_id': teacher_id}).fetchall()
-    teacher_data['recentStudents'] = [dict(row._mapping) for row in recent_students]
+    recent_students = db.session.execute(recent_students_query, {'teacher_id': teacher_id})
+    teacher_data['recentStudents'] = [dict(row._mapping) for row in recent_students.fetchall()]
 
     # 6. Optionally, add dashboard stats
     # (You can add more stats here if needed)
